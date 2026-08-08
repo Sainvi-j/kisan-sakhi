@@ -20,7 +20,7 @@ function toastAlert(toast: ToastProps) {
         {description && <AlertDescription>{description}</AlertDescription>}
       </Alert>
     ),
-    { duration: 10_000 }
+    { duration: 12_000 }
   );
 }
 
@@ -30,34 +30,39 @@ export function useAgentErrors() {
 
   useEffect(() => {
     if (isConnected && agent.state === 'failed') {
-      const reasons = agent.failureReasons;
+      const reasons = agent.failureReasons || [];
 
-      toastAlert({
-        title: 'Session ended',
-        description: (
-          <>
-            {reasons.length > 1 && (
-              <ul className="list-inside list-disc">
-                {reasons.map((reason) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
-            )}
-            {reasons.length === 1 && <p className="w-full">{reasons[0]}</p>}
-            <p className="w-full">
-              <a
-                target="_blank"
-                rel="noopener noreferrer"
-                href="https://docs.livekit.io/agents/start/voice-ai/"
-                className="whitespace-nowrap underline"
-              >
-                See quickstart guide
-              </a>
-              .
-            </p>
-          </>
-        ),
-      });
+      // Check if it looks like a microphone permission problem
+      const isMicError = reasons.some(
+        (r) =>
+          r.toLowerCase().includes('permissiondenied') ||
+          r.toLowerCase().includes('notallowederror') ||
+          r.toLowerCase().includes('microphone')
+      );
+
+      if (isMicError) {
+        toastAlert({
+          title: 'Microphone access blocked',
+          description: (
+            <div className="space-y-2">
+              <p>Please allow microphone permission to talk to Kisan Sakhi.</p>
+              <p className="text-sm opacity-80">
+                Click the lock icon in the address bar → Site settings → Allow Microphone → then try again.
+              </p>
+            </div>
+          ),
+        });
+      } else {
+        toastAlert({
+          title: 'Session ended',
+          description: (
+            <div className="space-y-2">
+              {reasons.length > 0 && <p>{reasons[0]}</p>}
+              <p>Please try starting the conversation again.</p>
+            </div>
+          ),
+        });
+      }
 
       end();
     }
