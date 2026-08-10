@@ -19,6 +19,7 @@ from livekit.plugins import murf, silero, google, deepgram, noise_cancellation
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.plugins import murf, silero, google, deepgram, noise_cancellation, groq
 from memory import get_user, save_user
+import aiohttp
 
 logger = logging.getLogger("agent")
 
@@ -31,8 +32,9 @@ OBJECTIVES
 A successful conversation should:
 1. Quickly understand the farmer’s crop, location, and problem
 2. Give simple, practical advice
-3. Remember important details (with permission) so the next call is better
-4. Clearly say when you don’t have exact information
+3. Remember important details (with permission)
+4. Use real weather data when needed
+5. Clearly say when you don’t have exact information
 
 MEMORY RULES (Very Important)
 - First ask the farmer for their name.
@@ -41,6 +43,18 @@ MEMORY RULES (Very Important)
 - Before saving any new information, ALWAYS ask for permission.
   Example: "Shall I remember this for next time?"
 - Only call save_user_info AFTER the farmer clearly says yes.
+
+WEATHER TOOL
+- Whenever the farmer asks about weather, rain, temperature, humidity, or whether it is good for sowing/spraying/harvesting, call the get_weather tool.
+- Always use the district you already know from memory if available.
+- If you don’t know the district, ask for it first.
+- After getting the weather, explain it in simple words that a farmer can understand.
+- Always mention that the data is current / recent.
+
+MARKET PRICE TOOL
+- When the farmer asks about crop prices, mandi rates, or selling price, call the get_market_price tool.
+- Always clearly say that the prices are approximate.
+- If you know the farmer's district from memory, pass it to the tool.
 
 FACTS WORTH REMEMBERING
 - Name
@@ -109,12 +123,164 @@ async def save_user_info(
     user = save_user(user_id=user_id, name=name, facts=facts)
     return f"Saved successfully: {user}"
 
+@function_tool
+async def get_weather(
+    context: RunContext,
+    district: str,
+    state: str = "Madhya Pradesh",
+) -> str:
+    """
+    Get the current weather and short forecast for a district in India.
+    Use this whenever the farmer asks about weather, rain, temperature, or if it's good for farming activities.
+    
+    Args:
+        district: Name of the district (e.g. Bhopal, Indore, Jaipur)
+        state: Name of the state (default is Madhya Pradesh)
+    """
+    try:
+        # First get coordinates using Open-Meteo geocoding
+        geo_url = "https://geocoding-api.open-meteo.com/v1/search"
+        params = {
+            "name": f"{district}, {state}, India",
+            "count": 1,
+            "language": "en",
+            "format": "json"
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(geo_url, params=params) as resp:
+                if resp.status != 200:
+                    return "Sorry, I could not find that district right now. Please try again later."
+                
+                geo_data = await resp.json()
+                if not geo_data.get("results"):
+                    return f"I could not find the location {district}. Please check the district name."
+
+                lat = geo_data["results"][0]["latitude"]
+                lon = geo_data["results"][0]["longitude"]
+                place_name = geo_data["results"][0]["name"]
+
+            # Now get weather
+            weather_url = "https://api.open-meteo.com/v1/forecast"
+            weather_params = {
+                "latitude": lat,
+                "longitude": lon,
+                "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
+                "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
+                "timezone": "Asia/Kolkata",
+                "forecast_days": 3
+            }
+
+            async with session.get(weather_url, params=weather_params) as resp:
+                if resp.status != 200:
+                    return "Weather service is temporarily unavailable. Please try again in some time."
+
+                data = await resp.json()
+                current = data["current"]
+                daily = data["daily"]
+
+                # Simple weather code mapping
+                weather_codes = {
+                    0: "Clear sky",
+                    1: "Mainly clear",
+                    2: "Partly cloudy",
+                    3: "Overcast",
+                    45: "Foggy",
+                    61: "Light rain",
+                    63: "Moderate rain",
+                    65: "Heavy rain",
+                    80: "Rain showers",
+                    95: "Thunderstorm"
+                }
+                condition = weather_codes.get(current["weather_code"], "Unknown conditions")
+
+                result = (
+                    f"Current weather in {place_name}: {condition}. "
+                    f"Temperature is {current['temperature_2m']}°C with humidity {current['relative_humidity_2m']}%. "
+                    f"Wind speed is {current['wind_speed_10m']} km/h. "
+                    f"Today's maximum will be around {daily['temperature_2m_max'][0]}°C and minimum {daily['temperature_2m_min'][0]}°C. "
+                    f"Expected rainfall today: {daily['precipitation_sum'][0]} mm."
+                )
+                return result
+
+    except Exception as e:
+        return "I'm having trouble fetching the weather right now. Please try again after some time."
+
+@function_tool
+async def get_market_price(
+    context: RunContext,
+    crop: str,
+    district: str = None,
+) -> str:
+    """
+    Get approximate market price for a crop.
+    Use this when the farmer asks about mandi rates, selling price, or current price of any crop.
+    Understands both English and Hindi crop names.
+    
+    Args:
+        crop: Name of the crop in English or Hindi (e.g. wheat, gehun, rice, chawal, mustard, sarson)
+        district: Optional district name
+    """
+    # Bigger price list (approximate ₹ per quintal)
+    price_data = {
+        # English + Hindi mappings
+        "wheat": {"min": 2200, "max": 2450, "avg": 2320, "hindi": "gehun"},
+        "gehun": {"min": 2200, "max": 2450, "avg": 2320, "hindi": "gehun"},
+        "rice": {"min": 2800, "max": 3200, "avg": 3000, "hindi": "chawal"},
+        "chawal": {"min": 2800, "max": 3200, "avg": 3000, "hindi": "chawal"},
+        "paddy": {"min": 2100, "max": 2350, "avg": 2220, "hindi": "dhan"},
+        "dhan": {"min": 2100, "max": 2350, "avg": 2220, "hindi": "dhan"},
+        "mustard": {"min": 5200, "max": 5800, "avg": 5500, "hindi": "sarson"},
+        "sarson": {"min": 5200, "max": 5800, "avg": 5500, "hindi": "sarson"},
+        "cotton": {"min": 6500, "max": 7200, "avg": 6800, "hindi": "kapas"},
+        "kapas": {"min": 6500, "max": 7200, "avg": 6800, "hindi": "kapas"},
+        "soybean": {"min": 4200, "max": 4700, "avg": 4450, "hindi": "soyabean"},
+        "soyabean": {"min": 4200, "max": 4700, "avg": 4450, "hindi": "soyabean"},
+        "maize": {"min": 1800, "max": 2100, "avg": 1950, "hindi": "makka"},
+        "makka": {"min": 1800, "max": 2100, "avg": 1950, "hindi": "makka"},
+        "onion": {"min": 1200, "max": 1800, "avg": 1500, "hindi": "pyaz"},
+        "pyaz": {"min": 1200, "max": 1800, "avg": 1500, "hindi": "pyaz"},
+        "potato": {"min": 900, "max": 1400, "avg": 1100, "hindi": "aloo"},
+        "aloo": {"min": 900, "max": 1400, "avg": 1100, "hindi": "aloo"},
+        "tomato": {"min": 800, "max": 1600, "avg": 1200, "hindi": "tamatar"},
+        "tamatar": {"min": 800, "max": 1600, "avg": 1200, "hindi": "tamatar"},
+        "chilli": {"min": 8000, "max": 12000, "avg": 10000, "hindi": "mirch"},
+        "mirch": {"min": 8000, "max": 12000, "avg": 10000, "hindi": "mirch"},
+        "turmeric": {"min": 7000, "max": 9000, "avg": 8000, "hindi": "haldi"},
+        "haldi": {"min": 7000, "max": 9000, "avg": 8000, "hindi": "haldi"},
+        "groundnut": {"min": 5500, "max": 6200, "avg": 5800, "hindi": "moongfali"},
+        "moongfali": {"min": 5500, "max": 6200, "avg": 5800, "hindi": "moongfali"},
+        "gram": {"min": 4800, "max": 5400, "avg": 5100, "hindi": "chana"},
+        "chana": {"min": 4800, "max": 5400, "avg": 5100, "hindi": "chana"},
+        "moong": {"min": 7000, "max": 8000, "avg": 7500, "hindi": "moong"},
+        "arhar": {"min": 6500, "max": 7500, "avg": 7000, "hindi": "arhar"},
+        "tur": {"min": 6500, "max": 7500, "avg": 7000, "hindi": "arhar"},
+    }
+
+    crop_key = crop.strip().lower()
+
+    if crop_key not in price_data:
+        return (
+            f"I don't have price data for {crop} right now. "
+            "Please check your local mandi or eNAM for accurate rates."
+        )
+
+    data = price_data[crop_key]
+    location_text = f" in {district}" if district else ""
+
+    result = (
+        f"Approximate market price for {crop}{location_text}: "
+        f"around ₹{data['avg']} per quintal. "
+        f"Usually ranges between ₹{data['min']} to ₹{data['max']}. "
+        f"Note: These are approximate rates. For exact today's price, please check your local mandi or eNAM."
+    )
+    return result
 
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
             instructions=SYSTEM_PROMPT,
-            tools=[lookup_user, save_user_info],
+            tools=[lookup_user, save_user_info, get_weather, get_market_price],
         )
 
 

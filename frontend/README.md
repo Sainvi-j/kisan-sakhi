@@ -1,15 +1,17 @@
-# Frontend — Voice Agent UI
+## Kisan Sakhi – Farm & Field Voice Agent
 
-The React/Next.js frontend for the Voice Agent Starter. Built with [LiveKit Agents UI](https://livekit.io/ui) components, it provides a polished interface for real-time voice conversations with your agent.
+This project is part of the **10 Days of Voice Agents – #VoiceForBharat** challenge by Murf AI.
 
-### Features
+### Track
+**Farm & Field**
 
-- Real-time voice interaction with LiveKit Agents
-- Camera video streaming support
-- Screen sharing capabilities
-- Multiple audio visualizer styles (`bar`, `grid`, `radial`, `wave`, `aura`)
-- Light/dark theme switching with system preference detection
-- Customizable branding, colors, and UI text via configuration
+### Agent
+**Kisan Sakhi** – A voice assistant that helps Indian farmers with crop advice, market prices, and weather.
+
+### Data Sources (Day 5)
+- **Weather**: Live data from [Open-Meteo](https://open-meteo.com) (free public API)
+- **Market Prices**: Approximate / sample local data (not live API).  
+  Exact live mandi prices should be checked on local mandi or [eNAM](https://enam.gov.in).
 
 ## Setup
 
