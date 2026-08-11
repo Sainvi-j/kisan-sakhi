@@ -1,7 +1,7 @@
 import logging
-
+import asyncio
 from dotenv import load_dotenv
-from livekit import rtc
+from livekit import rtc, api
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -20,6 +20,7 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.plugins import murf, silero, google, deepgram, noise_cancellation, groq
 from memory import get_user, save_user
 import aiohttp
+from requests import session
 
 logger = logging.getLogger("agent")
 
@@ -300,6 +301,10 @@ async def my_agent(ctx: JobContext):
         "room": ctx.room.name,
     }
 
+    # Get the phone number from metadata
+    phone_number = ctx.job.metadata
+    print(f"Going to call: {phone_number}")
+
     session = AgentSession(
         stt=deepgram.STT(model="nova-3"),
         llm=groq.LLM(model="llama-3.3-70b-versatile"),
@@ -330,6 +335,23 @@ async def my_agent(ctx: JobContext):
 
     await ctx.connect()
 
+    print("Waiting for SIP participant...")
+
+    # Wait specifically for the phone participant
+    participant = await ctx.wait_for_participant(identity="kisan-sakhi-caller")
+    print(f"SIP participant joined: {participant.identity}")
+
+    # Extra wait for media to stabilize
+    await asyncio.sleep(3)
+
+    print("Speaking greeting now...")
+    await session.say(
+        "Namaste, this is Kisan Sakhi calling. "
+        "I am your farming assistant. "
+        "I am calling about your farm. "
+        "You can say stop anytime if you don't want this call."
+    )
+    print("Greeting finished")
 
 if __name__ == "__main__":
     cli.run_app(server)
