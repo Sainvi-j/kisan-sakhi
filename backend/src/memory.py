@@ -79,3 +79,65 @@ def save_user(user_id: str, name: str = None, language_preference: str = "hingli
 
 # Create the table when this file is imported
 init_db()
+
+def create_escalation(user_id: str, name: str, reason: str, summary: str, urgency: str = "medium"):
+    """Create a new human help request."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Create table if it doesn't exist
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS escalations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reference_id TEXT UNIQUE,
+            user_id TEXT,
+            name TEXT,
+            reason TEXT,
+            summary TEXT,
+            urgency TEXT,
+            status TEXT DEFAULT 'open',
+            created_at TEXT
+        )
+    """)
+
+    import uuid
+    from datetime import datetime
+
+    reference_id = f"KS-{str(uuid.uuid4())[:8].upper()}"
+    now = datetime.utcnow().isoformat()
+
+    cursor.execute("""
+        INSERT INTO escalations (reference_id, user_id, name, reason, summary, urgency, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (reference_id, user_id, name, reason, summary, urgency, now))
+
+    conn.commit()
+    conn.close()
+    return reference_id
+
+
+def get_open_escalations():
+    """Get all open escalation requests (for later viewing)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Make sure the table exists
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS escalations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reference_id TEXT UNIQUE,
+            user_id TEXT,
+            name TEXT,
+            reason TEXT,
+            summary TEXT,
+            urgency TEXT,
+            status TEXT DEFAULT 'open',
+            created_at TEXT
+        )
+    """)
+    conn.commit()
+
+    cursor.execute("SELECT * FROM escalations WHERE status = 'open' ORDER BY created_at DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]

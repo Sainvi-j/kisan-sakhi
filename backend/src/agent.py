@@ -2,6 +2,7 @@ import logging
 import asyncio
 from dotenv import load_dotenv
 from livekit import rtc, api
+from memory import get_user, save_user, create_escalation, get_open_escalations
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -34,8 +35,9 @@ A successful conversation should:
 1. Quickly understand the farmer’s crop, location, and problem
 2. Give simple, practical advice
 3. Remember important details (with permission)
-4. Use real weather data when needed
-5. Clearly say when you don’t have exact information
+4. Use real weather and price data when needed
+5. Ask for human help when the problem is serious or data is missing
+6. Clearly say when you don’t have exact information
 
 MEMORY RULES (Very Important)
 - First ask the farmer for their name.
@@ -57,6 +59,25 @@ MARKET PRICE TOOL
 - Always clearly say that the prices are approximate.
 - If you know the farmer's district from memory, pass it to the tool.
 
+HUMAN HELP (Escalation Rules)
+You must call the create_escalation tool in these two situations only:
+
+1. The farmer reports a serious crop problem  
+   Examples: crop is dying, heavy pest attack, unknown disease, sudden large loss
+
+2. Important data is missing or unreliable  
+   Examples: weather service failed, market price not available, and the farmer urgently needs accurate information
+
+Before creating any escalation:
+- Clearly tell the farmer what information you want to share
+- Ask for permission: "Shall I create a help request for a human expert?"
+- Only call the tool if the farmer says yes
+
+When you create the escalation:
+- Give the farmer the Reference ID
+- Tell them a human will review it (do not promise immediate reply)
+- Keep the summary short and useful
+
 FACTS WORTH REMEMBERING
 - Name
 - Main crop (wheat, rice, cotton, etc.)
@@ -65,8 +86,8 @@ FACTS WORTH REMEMBERING
 - Irrigation type (if mentioned)
 
 LANGUAGE
-- Understand Hindi, Hinglish, and English
 - Always reply in clear and simple Indian English
+- Understand Hindi, Hinglish, and English
 - Keep language easy, respectful, and short
 
 GUARDRAILS
@@ -277,11 +298,36 @@ async def get_market_price(
     )
     return result
 
+@function_tool
+async def create_escalation(
+    context: RunContext,
+    name: str,
+    reason: str,
+    summary: str,
+    urgency: str = "medium",
+) -> str:
+    """
+    Create a request for human help.
+    Use this ONLY when:
+    1. The farmer reports a serious crop problem (disease, heavy pests, crop dying)
+    2. Important data (weather or market price) is missing or unreliable and the farmer needs accurate help urgently.
+    
+    ALWAYS ask for permission before calling this tool.
+    """
+    user_id = name.strip().lower()
+    reference_id = create_escalation(
+        user_id=user_id,
+        name=name,
+        reason=reason,
+        summary=summary,
+        urgency=urgency,
+    )
+    return f"Escalation created successfully. Reference ID: {reference_id}"
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
             instructions=SYSTEM_PROMPT,
-            tools=[lookup_user, save_user_info, get_weather, get_market_price],
+            tools=[lookup_user, save_user_info, get_weather, get_market_price, create_escalation],
         )
 
 
@@ -307,7 +353,7 @@ async def my_agent(ctx: JobContext):
 
     session = AgentSession(
         stt=deepgram.STT(model="nova-3"),
-        llm=groq.LLM(model="llama-3.3-70b-versatile"),
+        llm=google.LLM(model="gemini-3.6-flash"),
         tts=murf.TTS(
             voice="Anisha",
             style="Conversation",
