@@ -141,3 +141,61 @@ def get_open_escalations():
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+def log_call_outcome(success: bool, reason: str = "", user_name: str = ""):
+    """Log the outcome of a call."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS call_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            success INTEGER,
+            reason TEXT,
+            user_name TEXT,
+            created_at TEXT
+        )
+    """)
+
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+
+    cursor.execute("""
+        INSERT INTO call_logs (success, reason, user_name, created_at)
+        VALUES (?, ?, ?, ?)
+    """, (1 if success else 0, reason, user_name, now))
+
+    conn.commit()
+    conn.close()
+
+
+def get_call_stats():
+    """Get total, successful and failed calls."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS call_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            success INTEGER,
+            reason TEXT,
+            user_name TEXT,
+            created_at TEXT
+        )
+    """)
+    conn.commit()
+
+    cursor.execute("SELECT COUNT(*) FROM call_logs")
+    total = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM call_logs WHERE success = 1")
+    successful = cursor.fetchone()[0]
+
+    failed = total - successful
+    conn.close()
+
+    return {
+        "total": total,
+        "successful": successful,
+        "failed": failed
+    }

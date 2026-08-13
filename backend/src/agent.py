@@ -2,7 +2,7 @@ import logging
 import asyncio
 from dotenv import load_dotenv
 from livekit import rtc, api
-from memory import get_user, save_user, create_escalation, get_open_escalations
+from memory import get_user, save_user, create_escalation, get_open_escalations, log_call_outcome
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -323,11 +323,25 @@ async def create_escalation(
         urgency=urgency,
     )
     return f"Escalation created successfully. Reference ID: {reference_id}"
+
+@function_tool
+async def mark_call_successful(
+    context: RunContext,
+    reason: str = "Provided useful information",
+    user_name: str = "",
+) -> str:
+    """
+    Call this tool when the conversation was successful.
+    Successful means the farmer received weather info, market price, or an escalation was created.
+    """
+    from memory import log_call_outcome
+    log_call_outcome(success=True, reason=reason, user_name=user_name)
+    return "Call marked as successful."
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
             instructions=SYSTEM_PROMPT,
-            tools=[lookup_user, save_user_info, get_weather, get_market_price, create_escalation],
+            tools=[lookup_user, save_user_info, get_weather, get_market_price, create_escalation, mark_call_successful],
         )
 
 
@@ -353,7 +367,7 @@ async def my_agent(ctx: JobContext):
 
     session = AgentSession(
         stt=deepgram.STT(model="nova-3"),
-        llm=google.LLM(model="gemini-3.6-flash"),
+        llm=groq.LLM(model="llama-3.3-70b-versatile"),
         tts=murf.TTS(
             voice="Anisha",
             style="Conversation",
