@@ -96,6 +96,7 @@ GUARDRAILS
 - Never give medical advice
 - Never promise government scheme approval
 - Always ask before saving personal information
+- When the farmer describes a serious crop problem (plants dying, yellowing, heavy pests, disease), call the transfer_to_crop_specialist tool.
 
 STYLE
 - Short and clear sentences
@@ -337,6 +338,30 @@ async def mark_call_successful(
     from memory import log_call_outcome
     log_call_outcome(success=True, reason=reason, user_name=user_name)
     return "Call marked as successful."
+
+class CropSpecialist(Agent):
+    def __init__(self, chat_ctx=None) -> None:
+        super().__init__(
+            instructions="""You are the Crop Problem Specialist for Kisan Sakhi.
+Your only job is to help farmers with serious crop problems such as:
+- Plants turning yellow or dying
+- Heavy pest attacks
+- Unknown diseases
+- Sudden crop damage
+
+Be calm, practical and helpful.
+Ask 1-2 clarifying questions if needed (crop name, how many plants affected, when it started).
+Give simple advice a farmer can understand.
+If the problem is very serious, suggest contacting a local agriculture officer.
+Do not talk about weather or market prices.
+Speak in clear and simple Indian English.""",
+            chat_ctx=chat_ctx,
+        )
+
+    async def on_enter(self) -> None:
+        await self.session.generate_reply(
+            instructions="Introduce yourself as the Crop Problem Specialist and say you are here to help with the crop issue."
+        )
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
@@ -344,6 +369,16 @@ class Assistant(Agent):
             tools=[lookup_user, save_user_info, get_weather, get_market_price, create_escalation, mark_call_successful],
         )
 
+    @function_tool()
+    async def transfer_to_crop_specialist(self, context: RunContext, reason: str = "serious crop problem"):
+        """Transfer the conversation to the Crop Problem Specialist.
+        Use this when the farmer reports a serious crop problem such as plants dying, yellowing leaves, heavy pests, or unknown disease.
+        
+        Args:
+            reason: Short reason for the transfer
+        """
+        specialist = CropSpecialist(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+        return specialist, "I am connecting you to our Crop Problem Specialist who can help you better with this issue."
 
 server = AgentServer()
 
