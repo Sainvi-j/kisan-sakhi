@@ -13,8 +13,8 @@ async def make_outbound_call():
     )
 
     room_name = "kisan-sakhi-outbound-call"
-    phone_number = "+919755110658"
-    trunk_id = "ST_QZrfFAvjJ8uK"
+    phone_number = "+91YourPhoneNumber"  # Replace with the actual phone number you want to call
+    trunk_id = "YourSIPTrunkID"  # Replace with your actual SIP trunk ID
 
     # Create room + dispatch agent
     await livekit_api.agent_dispatch.create_dispatch(
